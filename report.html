@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DSH 执行时间：优化点分析</title>
+<style>
+  :root{
+    --bg:#0a0b0f; --panel:#12141b; --panel2:#181b24; --line:#242833;
+    --fg:#e8eaf0; --dim:#8b93a7; --dim2:#5d6478;
+    --a:#4cc2ff; --b:#ffb84c; --c:#ff6b6b; --d:#9d7bff; --e:#3ddc97;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 96px}
+  h1{font-size:30px;line-height:1.25;margin:0 0 10px;letter-spacing:-.02em;font-weight:650}
+  h2{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim2);
+    margin:56px 0 18px;font-weight:600;border-bottom:1px solid var(--line);padding-bottom:10px}
+  h3{font-size:15.5px;margin:0 0 10px;font-weight:620;letter-spacing:-.01em}
+  .sub{color:var(--dim);font-size:13.5px;margin:0 0 34px;max-width:72ch}
+  .verdict{background:linear-gradient(135deg,#131a24,#141821);
+    border:1px solid #23303f;border-left:3px solid var(--e);border-radius:10px;
+    padding:22px 24px;margin:0 0 8px}
+  .verdict p{margin:0;font-size:15.5px;line-height:1.7}
+  .verdict .k{color:var(--e);font-variant-numeric:tabular-nums;font-weight:650}
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0 0}
+  .kpi div{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:16px 16px 14px}
+  .kpi .v{font-size:26px;font-weight:620;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+  .kpi .l{font-size:11.5px;color:var(--dim);margin-top:7px;line-height:1.45}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{text-align:right;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--dim2);font-weight:600;padding:0 0 9px;border-bottom:1px solid var(--line)}
+  th:first-child{text-align:left}
+  td{padding:9px 0;border-bottom:1px solid #1a1d26;text-align:right;font-size:13px}
+  td:first-child{text-align:left;color:var(--fg)}
+  .muted{color:var(--dim)}
+  .track{position:relative;height:7px;background:#1a1d26;border-radius:4px;overflow:hidden;min-width:80px}
+  .fill{position:absolute;inset:0 auto 0 0;border-radius:4px}
+  .stack{display:flex;height:34px;border-radius:7px;overflow:hidden;border:1px solid var(--line);
+    margin:0 0 14px;font-size:11px}
+  .stack i{display:flex;align-items:center;justify-content:center;color:#08090c;
+    font-weight:700;font-style:normal;font-variant-numeric:tabular-nums;overflow:hidden;
+    white-space:nowrap}
+  .legend{display:flex;flex-wrap:wrap;gap:18px;font-size:12px;color:var(--dim);margin:0 0 8px}
+  .legend span{display:flex;align-items:center;gap:7px}
+  .dot{width:9px;height:9px;border-radius:2px;flex:none}
+  .note{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:15px 18px;font-size:13px;color:var(--dim);line-height:1.7;margin:18px 0 0}
+  .note b{color:var(--fg);font-weight:600}
+  .note code{background:#0d1017;border:1px solid var(--line);border-radius:4px;
+    padding:1px 6px;font-size:12px;color:var(--b);font-family:ui-monospace,Consolas,monospace}
+  .note ul{margin:10px 0 0;padding-left:22px}
+  .note li{margin:5px 0}
+  .big{font-size:15px;font-weight:600;color:var(--fg)}
+  .row-hi{background:rgba(61,220,151,.055)}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 22px;margin:0 0 14px;border-left:3px solid var(--line)}
+  .step[data-rank="1"]{border-left-color:var(--e)}
+  .step[data-rank="2"]{border-left-color:var(--b)}
+  .step[data-rank="3"]{border-left-color:var(--a)}
+  .step[data-rank="4"]{border-left-color:var(--d)}
+  .step .hdr{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .step .idx{font-size:11px;font-weight:700;letter-spacing:.1em;color:var(--dim2);
+    border:1px solid var(--line);border-radius:4px;padding:2px 8px;flex:none}
+  .step .gain{margin-left:auto;font-size:13px;font-weight:650;color:var(--e);
+    font-variant-numeric:tabular-nums;flex:none}
+  .step .why{font-size:13px;color:var(--dim);line-height:1.7}
+  .step .why b{color:var(--fg)}
+  .percept{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0 0}
+  .percept div{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:18px}
+  .percept .v{font-size:30px;font-weight:650;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  .percept .l{font-size:12px;color:var(--dim);margin-top:6px;line-height:1.5}
+  .barlist{margin:6px 0 0}
+  .barlist .r{display:grid;grid-template-columns:104px 1fr 92px;gap:14px;align-items:center;
+    padding:7px 0;font-size:13px;font-variant-numeric:tabular-nums}
+  .barlist .r .lab{color:var(--dim);text-align:right}
+  .dont{background:#14100f;border:1px solid #3a2622;border-left:3px solid var(--c);
+    border-radius:9px;padding:15px 18px;font-size:13px;color:#c9b8b4;line-height:1.8}
+  .dont b{color:var(--fg)}
+  .dont ul{margin:8px 0 0;padding-left:22px}
+  .dont li{margin:6px 0}
+  footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--line);
+    color:var(--dim2);font-size:11.5px;line-height:1.9}
+  footer code{color:var(--dim);font-family:ui-monospace,Consolas,monospace}
+  @media(max-width:760px){
+    .kpi{grid-template-columns:repeat(2,1fr)}
+    .percept{grid-template-columns:1fr}
+    .barlist .r{grid-template-columns:80px 1fr 72px}
+    .wrap{padding:32px 18px 64px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>DSH 执行时间：优化点分析</h1>
+  <p class="sub">
+    口径：284 个会话、83,648 个 LLM 窗口、86,622 次工具调用、2,883 个 turn，
+    总 turn 墙钟 557.35 小时。所有数字来自会话日志的完整回放，不采样。
+  </p>
+
+  <div class="verdict">
+    <p>
+      557 小时里，<span class="k">工具 38.6%</span>、<span class="k">等首 token 33.5%</span>、
+      生成 24.7%。而工具那 215 小时里，<span class="k">59.9 小时是在 <code>Start-Sleep</code> 里空等</span>；
+      生成那 138 小时里，reasoning 占 82.4%。
+      <br><br>
+      可落地、不牺牲质量的两项——<b>消灭 sleep 轮询（59.9h）</b> 和 <b>消除重复读文件（16.6h）</b>——
+      合计 <span class="k">76.5 小时，占总墙钟 13.7%</span>。
+    </p>
+  </div>
+
+  <div class="kpi">
+    <div><div class="v">557.4h</div><div class="l">总 turn 墙钟<br>2,883 个 turn</div></div>
+    <div><div class="v" style="color:var(--e)">76.5h</div><div class="l">零质量损失的优化空间<br>13.7%</div></div>
+    <div><div class="v" style="color:var(--b)">59.9h</div><div class="l">Start-Sleep 空等<br>占工具时间 27.8%</div></div>
+    <div><div class="v" style="color:var(--a)">89.8%</div><div class="l">静默步占比<br>不产出正文</div></div>
+  </div>
+
+  <h2>一 · 时间到底去哪了</h2>
+
+  <div class="stack">
+    <i style="width:38.6%;background:var(--b)">工具 38.6%</i>
+    <i style="width:33.5%;background:var(--a)">TTFT 33.5%</i>
+    <i style="width:24.7%;background:var(--d)">生成 24.7%</i>
+    <i style="width:3.2%;background:var(--dim2)"></i>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--b)"></i>工具执行 215.21h</span>
+    <span><i class="dot" style="background:var(--a)"></i>等首 token 186.94h</span>
+    <span><i class="dot" style="background:var(--d)"></i>生成 137.94h</span>
+    <span><i class="dot" style="background:var(--dim2)"></i>宿主 / 未归属 17.25h</span>
+  </div>
+
+  <p class="sub" style="margin-top:22px">
+    生成那 137.94 小时再往下拆：reasoning 解码 <b>83.6h（61%）</b>、
+    tool-args JSON 解码 <b>26.5h（19%）</b>、正文只有 4.7h（3%）。
+    输出 token 里 reasoning 占 <b>82.4%</b>（61.8M / 75.1M）——思考是正文的 24.5 倍。
+  </p>
+
+  <h2>二 · 优化点，按性价比排序</h2>
+
+  <div class="step" data-rank="1">
+    <div class="hdr">
+      <span class="idx">01</span>
+      <h3>消灭 Start-Sleep 轮询</h3>
+      <span class="gain">−59.9 h · 10.7%</span>
+    </div>
+    <div class="why">
+      <b>4,770 次 <code>pwsh</code> 里带 <code>Start-Sleep</code>，实测墙钟 59.9 小时。</b>
+      这意味着 pwsh 跑的 162.7 小时里，有 37% 什么都没干，就在 sleep。
+      <br><br>
+      <table style="margin-top:14px">
+        <thead><tr><th>单次时长</th><th>次数</th><th>合计</th></tr></thead>
+        <tbody>
+          <tr><td>0–10s</td><td>1,663</td><td class="muted">2.45h</td></tr>
+          <tr><td>10–30s</td><td>1,383</td><td class="muted">6.86h</td></tr>
+          <tr><td>30–60s</td><td>702</td><td class="muted">8.30h</td></tr>
+          <tr class="row-hi"><td>60–180s</td><td>769</td><td>21.14h</td></tr>
+          <tr class="row-hi"><td>180–600s</td><td>232</td><td>17.30h</td></tr>
+          <tr><td>600–1200s</td><td>17</td><td class="muted">2.83h</td></tr>
+          <tr><td>&gt;1200s</td><td>1</td><td class="muted">0.94h</td></tr>
+        </tbody>
+      </table>
+      <br>
+      <b>≥120 秒的 475 次独占 29.6 小时</b>，这些几乎必然是超调——固定睡 600 秒，而活儿 90 秒就完了。
+      最长单次 3,388 秒（<code>Start registration keepalive watchdog</code>）。
+      叠加 <code>job_output wait:true</code> 的 952 次 / 31.3 小时，<b>两者合计 91.2h = 总墙钟 16.4%</b>。
+      <br><br>
+      <b>改法</b>：等外部进程结束一律用 <code>job_output(wait:true, timeout_ms)</code>；
+      真要定时采样，让后台作业自己在完成时写标记文件，主流程用一次阻塞等待取代 N 次 sleep。
+    </div>
+  </div>
+
+  <div class="step" data-rank="2">
+    <div class="hdr">
+      <span class="idx">02</span>
+      <h3>reasoning effort：max 在 120–250k 区间代价极大</h3>
+      <span class="gain">−38.8 h · 7.0%</span>
+    </div>
+    <div class="why">
+      同上下文、同 provider、只差 effort 的对照：
+      <table style="margin-top:14px">
+        <thead><tr><th>provider</th><th>上下文</th><th>high</th><th>max</th><th>差</th></tr></thead>
+        <tbody>
+          <tr><td>opendesign</td><td>60–120k</td><td>8.1s</td><td>11.3s</td><td>+3.2s</td></tr>
+          <tr class="row-hi"><td><b>opendesign</b></td><td><b>120–250k</b></td><td><b>8.7s</b></td><td><b>18.8s</b></td><td><b>+10.0s</b></td></tr>
+          <tr><td>dsh-opencode-go</td><td>60–120k</td><td>11.2s</td><td>11.9s</td><td>+0.6s</td></tr>
+          <tr><td>dsh-opencode-go</td><td>120–250k</td><td>12.6s</td><td>13.2s</td><td>+0.6s</td></tr>
+        </tbody>
+      </table>
+      <br>
+      opendesign 在 120–250k 时，<code>max</code> 比 <code>high</code> <b>多花一倍多</b>（18.8s vs 8.7s），
+      换来的输出只从 705 tok 到 875 tok（+24%）。
+      全量换算：<code>max</code> 的 41,898 步若全改 <code>high</code> → <b>省 38.8h</b>。
+      <br><br>
+      <b>折中方案</b>：只在 opendesign 上、且上下文已超 120k 时降到 <code>high</code>——这一档单独就是 <b>29.2h</b>。
+      当前 <code>agent-default-model.reasoningEffort: max</code>。
+    </div>
+  </div>
+
+  <div class="step" data-rank="3">
+    <div class="hdr">
+      <span class="idx">03</span>
+      <h3>消除重复读文件</h3>
+      <span class="gain">−16.6 h · 3.0%</span>
+    </div>
+    <div class="why">
+      同会话内重复读同一路径：1,558 个路径、<b>7,747 次冗余调用</b>。
+      其中<b>整步唯一动作就是重读已读过的文件：6,748 步 / LLM 16.59h</b>。
+      <br><br>
+      改（edit/write）之后再 read 同一文件 3,026 次，Top：
+      <table style="margin-top:14px">
+        <thead><tr><th>次数</th><th>文件</th></tr></thead>
+        <tbody>
+          <tr><td>299</td><td><code>CoinsBot\app\src\main\java\com\extend\coinsbot\whats\register\RegisterTaskThread.kt</code></td></tr>
+          <tr><td>163</td><td><code>CoinsBot\server\dashboard.py</code></td></tr>
+          <tr><td>82 + 74</td><td><code>whatsapp-android\src\wa_android\concurrent_runner.py</code></td></tr>
+          <tr><td>56</td><td><code>CoinsBot\server\db_api.py</code></td></tr>
+          <tr><td>46</td><td><code>KernelForge\scripts\profile_audit.ps1</code></td></tr>
+        </tbody>
+      </table>
+      <br>
+      完全相同的 <code>(name, arguments)</code> 重复调用：1,365 次 / 86,622。
+      <br><br>
+      <b>改法</b>：edit 成功后的返回值已含改动上下文，不需要回头 read 验证；
+      大文件用 grep 定位行号再局部 read。
+    </div>
+  </div>
+
+  <div class="step" data-rank="3">
+    <div class="hdr">
+      <span class="idx">04</span>
+      <h3>上下文再压一档（TTFT 的直接杠杆）</h3>
+      <span class="gain">−9.8 h · 1.8%</span>
+    </div>
+    <div class="why">
+      <b>TTFT 只随"总上下文长度"增长，不随"缓存未命中的新增 token"增长。</b>
+      opendesign 按 cache-miss 分桶 TTFT 是 3.2 / 3.5 / 3.4 / 2.7 / 4.1s——完全平；
+      按总上下文分桶是 2.2 / 3.1 / 4.0 / 4.1 / 3.4s。贵的不是新内容，是已缓存前缀的绝对长度。
+      <br><br>
+      现状：输入 p50 <b>117,925</b> tok、p90 255,559、p99 689,716、max 919,932；cache 命中率 p50 99%。
+      最近 7 天 p50 已涨到 132,170、p90 367,355，<b>14.4% 的步输入 &gt;300k</b>。
+      <br><br>
+      把所有 &gt;120k 的步压到 &lt;120k 水平，TTFT 省 <b>9.77h</b>（涉及 40,737 步）。
+      <br><br>
+      <b>已做的</b>：<code>thresholdRatio</code> 从 0.8 降到 0.45（opendesign 0.4），
+      压缩触发点从 838,400 提前到 <b>419,200</b>，这一项已经吃掉 9.77h 里的大头。
+      若想再压，<code>thresholdRatio</code> 再降到 0.30（触发点 314,400）。
+    </div>
+  </div>
+
+  <div class="step" data-rank="4">
+    <div class="hdr">
+      <span class="idx">05</span>
+      <h3>轮询链合并</h3>
+      <span class="gain">−5.6 h · 1.0%</span>
+    </div>
+    <div class="why">
+      连续"唯一工具是 sleep / job-wait"的链：<b>4,050 条、5,735 步、跨度 43.06h</b>，
+      其中模型往返 18.97h。链长 p50=1、p90=2、max=14；≥5 次的 63 条。
+      每条链从 N 次压到 1 次 → 省模型往返 <b>5.61h</b>。
+      <br><br>
+      <b>改法</b>：一次 <code>job_output(wait:true, timeout_ms:&lt;预期完成时间&gt;)</code> 拿到结果，
+      不要连发三次探测。timeout 不要一律填 600000——现在 300000 用了 175 次、600000 用了 145 次，
+      而 p50 实际完成时间只有 54 秒。
+    </div>
+  </div>
+
+  <div class="step" data-rank="4">
+    <div class="hdr">
+      <span class="idx">06</span>
+      <h3>修重试</h3>
+      <span class="gain">−4.4 h · 0.8%</span>
+    </div>
+    <div class="why">
+      带重试的步 359 个（0.43%），TTFT p50 <b>20.5s</b>（干净步 4.8s），合计 LLM 8.21h，
+      其中超额 <b>4.4h</b>——一次重试的代价约等于一次完整往返。
+      <br><br>
+      <b>已修</b>：opendesign 的 <code>streamIdleTimeoutMs</code> 从 90,000 改回默认 <b>300,000</b>
+      （<code>cordis.patch.yml:192</code>）。原来 90 秒门槛砍掉了 66 条还在出字的流，
+      其中 <b>42 条 30 秒内就恢复了</b>——是误砍。
+    </div>
+  </div>
+
+  <h2>三 · 组合效果</h2>
+
+  <table>
+    <thead><tr><th>方案组合</th><th>省下</th><th>占总墙钟</th><th>代价</th></tr></thead>
+    <tbody>
+      <tr class="row-hi"><td><b>① + ④</b>（sleep + 重复读）</td><td><b>76.5h</b></td><td><b>13.7%</b></td><td>无质量损失</td></tr>
+      <tr><td>① + ② + ④ + ⑤ + ⑥</td><td>125.3h</td><td>22.5%</td><td>思考量 −24%</td></tr>
+      <tr><td>全部（含 ③ 上下文再压）</td><td>135.1h</td><td>24.2%</td><td>压缩更频繁</td></tr>
+      <tr><td>只做 ①</td><td>59.9h</td><td>10.7%</td><td>无</td></tr>
+    </tbody>
+  </table>
+
+  <h2>四 · 不要做的事（有数据排除）</h2>
+
+  <div class="dont">
+    <ul>
+      <li>
+        <b>不要为了速度切 provider。</b>这条已按你的要求整条撤掉——套餐余额决定路由，不参与优化。
+        报告旧版里那套 provider 排序全部作废。
+      </li>
+      <li>
+        <b>并发不是瓶颈。</b>同一时刻 1 路并发 TTFT p50 为 3.3s，5–8 路并发反而降到 2.2s——
+        多开几个会话不会互相拖慢（排队在 provider 侧，不在本地）。
+      </li>
+      <li>
+        <b>"每步并发多工具省 127.6h"是错的，已撤回。</b>实测：单工具·只读 17.6%、
+        单工具·写操作 72.3%（有依赖不可合并）、多工具已并行 7.0%。
+        连续只读步段 2,695 段覆盖 9.8% 的步，2 合 1 只省 <b>9.0h = 3.4%</b>。
+        而且 <code>pwsh</code> 单工具步 43,807 中 <b>96.7%</b> 本来就是「一条命令多条语句」。
+        工具执行器本身是真并发（5,648 个多工具步串行度均值 1.17，4 个 read 起始散布 1–2ms）——
+        基础设施没问题，问题是合并空间本就极小。
+      </li>
+      <li>
+        <b>catalog 瘦身只省账单，不省时间。</b>62 个死工具加权 6,601 chars ≈ 2,063 tok/请求，
+        是 catalog 的 15.3%，但只占中位 prompt 的 1.8%。
+        由于 TTFT 不随新增 token 变化，删掉它们对速度几乎无影响。
+        （<code>workflow</code> 4,430 chars 出现在 99% 的请求里、调用 0 次；<code>subagent_fork</code> 1,504/99%/0 次。）
+      </li>
+      <li>
+        <b>compaction 不是瓶颈。</b>11,717 次仅耗 1.98h（失败 11,710 次，浪费 1.95h = 0.35%）。
+        但它是「输出 token 上限截断」的根因，见下节。
+      </li>
+    </ul>
+  </div>
+
+  <h2>五 · 顺带查出来的三个问题</h2>
+
+  <h3 style="margin-top:26px">5.1 输出 token 上限截断 = compaction 失败，不是"输出太多"</h3>
+  <p class="sub" style="margin-bottom:14px">
+    全库 81,662 条 assistant 消息里 <code>stopReason=length</code> 只有 <b>9 条</b>，
+    其中 <b>7 条根本不是输出太多</b>——maxTokens=null 或 128,000，输出只有 366/625/966/1,387/2,041/16/16 token，
+    内容块只有 reasoning。
+  </p>
+  <div class="note">
+    因果链：compaction 摘要被上游判 <code>length</code> → <code>dsh-compaction-basic</code> 的 <code>finishError()</code>
+    抛 <code>MAX_TOKENS</code> → 压缩失败 → 上下文不降 → 下一步又撞 → <code>dsh-agent-loop:966</code>
+    <code>if (finish.kind === "max-tokens") return { kind: "max-tokens" }</code> → turn 结束弹横幅。
+    <br><br>
+    <code>dsh-agent-loop:770</code> 还有个粘滞逻辑：<code>if (turnEnds === null || turnEnds.kind !== "max-tokens") turnEnds = stepEnd;</code>
+    ——一旦 turn 内出现过 max-tokens，后续 step 覆盖不掉。
+    <br><br>
+    <b>为什么以前看不到</b>：<code>compaction/end</code> 全库 11,717 次，成功 <b>7</b> 次。
+    <code>billion-context</code> 用 <code>dsh_compaction_refused</code> 拦掉了 11,674 次（99.7%）。
+    关掉它，原生压缩路径才第一次真正跑起来。
+    <br><br>
+    <b>已修</b>：整份覆盖 <code>preset-standard</code> 把 compaction 配置写进去——
+    <code>thresholdRatio 0.45</code>（opendesign 0.4）、<code>maxTokens 32768</code>、
+    <code>retainRatio 0.12</code>、<code>compactionRetries 2</code>。
+    <b>两条路都堵住</b>：装了 billion-context → 走快照；卸了 → 我的配置生效。
+    <br><br>
+    <b>原生路径已能跑通的证据</b>：2026-11-11 12:15:27 whatsapp-android 会话，
+    <code>compaction/end dur=27.44s error=null</code>，摘要是真正的 LLM 总结（不是 <code>&lt;bili-snapshot&gt;</code>）。
+    上一次原生 LLM 摘要成功是 <b>2026-09-24</b>——中间 48 天一次都没成功过。
+    全库 11,717 次 compaction 里，成功的只有 <b>7 次</b>（4 次快照 + 3 次原生）。
+  </div>
+
+  <h3 style="margin-top:32px">5.2 昨晚卡十几小时 = Windows 空闲睡眠</h3>
+  <p class="sub" style="margin-bottom:14px">
+    <code>Power-Troubleshooter</code> 日志铁证：<b>2026-11-10 19:44:26 → 2026-11-11 09:55:20 睡了 14h10m54s</b>
+    （唤醒源 Intel USB 3.20 控制器）。另有一次 16:38:44 → 16:49:45（11m01s）。
+    全库 40 条睡眠记录合计 <b>645.5 小时</b>。
+  </p>
+  <div class="note">
+    原因：<code>powercfg /q</code> 显示 AC 下 <code>STANDBYIDLE = 0x00000708</code> = <b>1800 秒（30 分钟空闲即睡）</b>。
+    DSH 自身<b>完全没有保活机制</b>——<code>resources</code> 全量扫（含 213MB 的 app.asar 备份）
+    <code>powerSaveBlocker</code> / <code>SetThreadExecutionState</code> / <code>ES_SYSTEM_REQUIRED</code>
+    / <code>prevent-app-suspension</code> 全部 0 命中；<code>powerMonitor</code> 只在 <code>resume</code> 时查更新。
+    <br><br>
+    冻住的现场：Pixel4Root turn9 卡 14h13m、SrcAntiDex turn2 卡 14h10m、
+    whatsapp-android turn11 卡 14h56m——都是醒来后靠 <code>RETRY</code> 才恢复。
+    11-10 16:00 → 11-11 10:10 窗口内 16 个 ≥20m 的 turn，<b>clockspan 52.83h 里 42.55h 是睡着的（80.5%）</b>。
+    <br><br>
+    <b>已修</b>：<code>powercfg /change standby-timeout-ac 0</code>，复核 AC 下 <code>STANDBYIDLE = 0x00000000</code>
+    （永不睡眠）、<code>HIBERNATEIDLE = 0x00000000</code>。关屏仍是 600 秒，不影响执行。不需要重启。
+  </div>
+
+  <h3 style="margin-top:32px">5.3 装插件会杀掉正在跑的 turn</h3>
+  <p class="sub" style="margin-bottom:14px">
+    全库 <code>aborted/disposed</code> 11 次、5 波，其中 <b>2026-11-10 18:10:18 一波 4 个会话同时被杀</b>，
+    合计 <b>2h56m</b> 在飞工作被丢、输出 87 万 token 作废。
+  </p>
+  <div class="note">
+    四波全部对得上 <code>plugin_manager</code> 触发的 pnpm 操作 mtime：
+    10-15 13:44:39 ← <code>operation-nKUOfW</code> 13:45:05；
+    11-05 18:53:58 ← <code>operation-rVXQQj</code> 18:51:57；
+    <b>11-10 18:10:18 ← <code>operation-7TqLuF</code> 18:09:15（58 秒前）</b>；
+    11-10 18:59:00 ← <code>operation-92EjWR</code> 18:58:52（8 秒前）。
+    <br><br>
+    源码路径：<code>dsh-agent-loop:1496</code> <code>machine.cancel({ kind: "disposed" }, ...)</code>
+    ——agent scope 拆除时取消所有在飞 turn。
+    <code>dsh-goal-round-driver:279</code> 更狠：<code>if (event.data.reason.reason.kind === "disposed") { disarm(state); return; }</code>
+    ——goal 自动续跑直接解除武装，不会自己恢复。
+    <br><br>
+    <b>改法</b>：装/卸插件挑没有长任务在跑的时候。目前无法热装。
+  </div>
+
+  <h2>六 · 感知延迟（用户感受最直接的那一段）</h2>
+
+  <div class="percept">
+    <div><div class="v">81s</div><div class="l">发完消息到第一句正文<br>P50</div></div>
+    <div><div class="v" style="color:var(--b)">319s</div><div class="l">P75<br>26.1% 超过 5 分钟</div></div>
+    <div><div class="v" style="color:var(--c)">768s</div><div class="l">P90<br>静默步占 89.5%</div></div>
+  </div>
+  <p class="sub" style="margin-top:20px">
+    每 9.8 步 / 216 秒才有一次正文输出。中间那些步在思考、在调工具，但屏幕上是静的。
+    <b>这也是"墨迹"的直接来源</b>——不是真的慢，是长时间没有任何可见增量。
+  </p>
+
+  <h2>七 · 配套工具</h2>
+  <p class="sub">
+    <code>dsh-speed-audit</code> 插件已装进 profile：侧栏「时间审计」面板实时显示
+    每步的 TTFT / reasoning / tool-args / 正文 / 工具执行分解，三条路由仅回环可访问。
+    源码在 <code>C:\Users\admin\Desktop\DSHSpeed\lib\</code>。
+  </p>
+
+  <h2>八 · 口径与可复现</h2>
+
+  <div class="note">
+    <b>口径</b>
+    <ul>
+      <li>时间来自会话日志的完整回放，不采样；区间按并集去重后再相加，避免工具窗口与 LLM 窗口重复计。</li>
+      <li><code>557.35h</code> 是 turn 墙钟总和，含跨夜睡眠的那几觉（已在 5.2 单独标注）。</li>
+      <li>reasoning token 是字符数 ÷ 4 估算；上报 <code>outputTokens</code> 与估算的比值是 1.28，说明 reasoning 被折进 output。</li>
+    </ul>
+    <br>
+    <b>复现脚本</b>（<code>C:\Users\admin\Desktop\DSHSpeed\.probe\</code>，用 bundled node 跑）：
+    <ul>
+      <li><code>opt16.mjs</code> — 557h 五分区（最权威）</li>
+      <li><code>opt18.mjs</code> — Start-Sleep 解剖 + 加权死 catalog</li>
+      <li><code>opt21.mjs</code> — TTFT vs 缓存未命中 / vs 总上下文 / effort 匹配对比</li>
+      <li><code>opt19.mjs</code> — 并发对 TTFT 的影响（证明无关）</li>
+      <li><code>opt9.mjs</code> / <code>opt12.mjs</code> — 重复 read / 轮询链</li>
+      <li><code>compact.mjs</code> — compaction 全量成败</li>
+      <li><code>hang5.mjs</code> / <code>gapclass.mjs</code> — 睡眠窗口与 gap 分类</li>
+      <li><code>kill.mjs</code> — disposed 杀 turn 与 pnpm 操作关联</li>
+    </ul>
+    <br>
+    <b>解析坑</b>（每一个都踩过）：
+    <ul>
+      <li>日志是<b>多帧 zstd 拼接</b>，按 magic <code>28 B5 2F FD</code> 切帧逐帧解，单次调用只解第一帧。</li>
+      <li><code>usage</code> 在 <code>data.usage</code>，不是 <code>data.message.usage</code>。</li>
+      <li>块时长只能 <code>sum(c.dt)</code>；<code>time0</code> 是请求起始时间的拷贝，不能当耗时。</li>
+      <li>块类型看 <code>c.chunk.blockType</code>（只在 block-start 里），读 <code>c.type</code> 会全部错配。</li>
+      <li><code>time</code> 是 epoch ms <b>UTC</b>，+8h 才是本地时间。</li>
+      <li><code>tool/result</code> 的 <code>isError</code> 不可信（85 万级样本只有 1.4% 标 true，连 <code>fatal: not a git repository</code> 都标 false）；判失败要看 callId 是否出现在任何 tool/result 里。</li>
+    </ul>
+  </div>
+
+  <footer>
+    生成于 2026-11-11 · 数据截至当日 13:00 · 284 个会话 / 83,648 个 LLM 窗口 / 86,622 次工具调用
+    <br>
+    相关文档：<code>speed-levers.md</code>（本文纯文本版）· <code>truncation.md</code>（截断根因）·
+    <code>hangs.md</code>（卡顿归因）· <code>failures.md</code>（调用失败审计）·
+    <code>entitlement.md</code>（计费类失败实测）
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# bundle patch: insert the speed-audit row into the web profile roster.
+- insert:
+    - id: speed-audit
+      name: dsh-speed-audit
+      config:
+        enabled: true

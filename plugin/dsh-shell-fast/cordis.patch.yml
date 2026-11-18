@@ -1,0 +1,29 @@
+# bundle patch: mount the PTY service, one PTY backend, and the fast shell tool.
+#
+# `backendType` must not collide with `@deepseek-ai/dsh-terminal`'s existing
+# backends (`shell`), so this row uses `shellfast`.
+- insert:
+    - id: shell-fast-pty
+      name: '@deepseek-ai/dsh-terminal'
+
+    - id: shell-fast-terminal
+      name: '@deepseek-ai/dsh-terminal-bash'
+      config:
+        backendType: shellfast
+        shellDialect: pwsh
+        shellPath: 'C:\Users\admin\AppData\Local\Programs\PowerShell\7\pwsh.exe'
+        shellArgs:
+          - '-NoLogo'
+          - '-NoProfile'
+        timeoutMs: 300000
+        idleSilenceMs: 3000
+        handoffGraceMs: 500
+        scrollbackLines: 10000
+
+    - id: shell-fast
+      name: dsh-shell-fast
+      config:
+        toolName: pws
+        backendType: shellfast
+        timeoutMs: 300000
+        maxOutputChars: 16000

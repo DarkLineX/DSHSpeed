@@ -1,0 +1,31 @@
+# 本地取证产物：体积巨大且与本仓库源码无关，不入库
+.probe/
+.backup/
+*.asar
+*.asar.new-staging
+
+# 会话日志 / 快照（含用户真实对话内容）
+*.jsonl
+*.jsonl.zstd
+snapshot*.json
+all-sessions.json
+
+# 运行期日志
+*.log
+*.result.txt
+
+# 截图与二进制
+*.png
+*.jpg
+*.exe
+*.dll
+*.zip
+
+# 编辑器 / 系统
+node_modules/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+__pycache__/
+*.pyc

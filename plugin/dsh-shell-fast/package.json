@@ -1,0 +1,28 @@
+{
+  "name": "dsh-shell-fast",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A second, persistent PowerShell tool that coexists with the cold-start `pwsh`: same marker/wrapper protocol as the first-party persistent tool, over a PTY backend, exposed under a non-colliding tool name.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.1-rc.2"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT"
+}
